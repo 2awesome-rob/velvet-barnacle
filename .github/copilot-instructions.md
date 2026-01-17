@@ -1,38 +1,61 @@
 # AI Agent Instructions for VB_scorekeeper
 
   ## Project Overview
-  This is a web application for collecting volleyball player statistics in real-time.
-  To support this, it must minimize user input requirements while maximizing data accuracy and completeness. The app must be game aware, understanding volleyball rules and player rotations to support prompting the user for necessary inputs only. The game log files must be structured and exportable to support post-game analysis. The app will be run on tablets or phones during games and screen layout must be optimized for quick access, minimal navigation, and intuitive game flow. For now, team management and statistical analysis functions will be handled in a separate application. This application focuses on collecting player statistics at the touch level.
+  VolleyStat is a web application for collecting volleyball player statistics on one team at the touch-to-touch level, in real-time.
+  To support this, the app must minimize user input requirements while maintaining data accuracy and completeness. The app must be game aware, understanding volleyball rules and player rotations to support prompting the user only for necessary inputs. The game log files must be structured and exportable to support post-game analysis. 
+  
+  The app will be run on tablets or phones during games and screen layout must be optimized for quick access, minimal navigation, and intuitive game flow. 
+
+  For now, team management and statistical analysis functions will be handled in a separate application. 
 
   ## Data Model
-  - **Persistent Records** are stored in tables in a sqlite database "OB_VBC.db" with schema:
-    - 1. The teams table is used to store both our team and opponent teams. This table enables mapping human readable (team_name and team_abbv) team names to team_id, as well as storing additional team metadata. Adding new teams throughout the season is important as club games are often tournament vs league play. 
+  - **Persistent Records** are stored in tables in a sqlite database "main.db" with schema:
+    - 1. The Teams table stores team metadata and enables mapping human readable (team_name and team_abbv) team names to team_id. Adding new teams throughout the season is important as tournament seeding and schedules are often unknown at the start of the season. VolleyStat must be able to load teams from the db table and add new teams to the db table.
       CREATE TABLE Teams (
           team_id INTEGER PRIMARY KEY AUTOINCREMENT,
           team_name TEXT NOT NULL,
           team_abbv TEXT NOT NULL,
+          season CHECK(season BETWEEN 25 AND 50),
           club TEXT,
-          season TEXT,
-          team_hometown TEXT,
-          team_coach TEXT
+          hometown TEXT,
+          coach TEXT
       );
 
-    - 2. The Rosters table is used to store players we are collecting performance stats on. This table enables mapping human readable labels (player_name, player_jersey) to player_id for players on our teams. Players are assigned to our teams using player_team; tracking players on opponent teams is neither required nor desired. Player position may be used in some prompts, but coaches may change player assignments from set to set, so it is NOT constraining. The Player_Roster will generally be static throughout the season, with few changes. Any need to update/modify can be handeled in a separate management application for now. 
-      CREATE TABLE Rosters (
+    - 2. The Roster table stores players on Our Teams. This table enables mapping human readable labels (player_name, player_jersey) to player_id for players on Our Teams. Players are assigned to our teams using player_team; tracking players on opponent teams is neither required nor desired. Player position may be used in some prompts, but coaches can change player assignments from set to set, so it is NOT constraining. Roster will generally be static throughout the season, with few changes. Any need to update/modify can be handeled in a separate management application for now. VolleyStat must be able to load players for a selected team from the db table.
+      CREATE TABLE Roster (
           player_id INTEGER PRIMARY KEY AUTOINCREMENT,
           player_name TEXT NOT NULL,
+          player_last_name TEXT,
           player_jersey INTEGER NOT NULL CHECK(player_jersey BETWEEN 0 AND 99),
-          player_position INTEGER,
+          position_id INTEGER,
           player_team INTEGER NOT NULL,
           FOREIGN KEY (player_team) REFERENCES Teams(team_id), 
-          FOREIGN KEY (player_position) REFERENCES Player_Positions(position_id), 
+          FOREIGN KEY (position_id) REFERENCES Positions(position_id), 
           UNIQUE(player_team, player_jersey)
       )
+    Positions lookup tables is loaded as a dictionary and enable us to map multiple display options for a position. This table is static and should only be updated by the app developer.
 
-    - 3. The Matches table stores the schedule for our teams. This table enables tracking each match and the associated match rules. Adding new matches is important throughout the season. An entry in the Matches table is required prior to data collection. 
-      CREATE TABLE Matches (
+      CREATE TABLE Positions (
+        position_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        position_name TEXT NOT NULL,
+        position_abbv TEXT NOT NULL
+      );
+      INSERT INTO Positions (position_name, position_abbv) VALUES
+        ("Setter", 'S'),
+        ("Outside Hitter", 'OH'),
+        ("Middle Blocker", 'M'),
+        ("Rightside Hitter", 'RS'),
+        ("Libero", 'L'),
+        ("Serve Specialist", 'SS'),
+        ("Defensive Specialist", 'DS'),
+        ("Utility", 'U');
+
+
+    - 3. The Schedule table stores the schedule for our teams. This table enables tracking each match and the associated match rules. Adding new matches is important throughout the season. An entry in the Schedule table is required prior to data collection. VolleyStat must be able to load scheduled Matches, add new Matches to the schedule, and update Matches when completed.
+      CREATE TABLE Schedule (
           match_id INTEGER PRIMARY KEY AUTOINCREMENT,
           match_date DATE,
+          match_time TIME,
           us_team_id INTEGER,
           them_team_id INTEGER,
           match_type INTEGER,
@@ -58,29 +81,35 @@
       INSERT INTO Match_Types (type_id, match_type) VALUES
         (1,	'League'),
         (2,	'Tournament'),
-        (3,	'Scrimage');
+        (5,	'Scrimmage');
 
       CREATE TABLE Match_Rules (
-          rule_id INTEGER PRIMARY KEY,
-          rule_description TEXT UNIQUE NOT NULL
+          rule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+          rule_surface TEXT NOT NULL,
+          rule_size INT NOT NULL,
+          rule_description TEXT,
+          UNIQUE (rule_surface, rule_description)
       );
-      INSERT INTO Match_Rules (rule_id, rule_description) VALUES
-        (1, 'Court: 6 on 6'),
-        (2, 'Beach: 2 on 2'),
-        (3, 'Grass: 3 on 3'),
-        (4, 'Pickup: 4 on 4');
+      INSERT INTO Match_Rules (rule_surface, rule_size) VALUES
+        ('Court', 6),
+        ('Beach', 2),
+        ('Grass', 3),
+        ('Court', 4);
 
       CREATE TABLE Match_Criteria(
           criteria_id INTEGER PRIMARY KEY,
           criteria_description TEXT UNIQUE NOT NULL
       );
       INSERT INTO Match_Criteria (criteria_id, criteria_description) VALUES
-        (1, 'Best of 3'),
-        (2, '3 Sets'),
-        (3, 'Best of 5'),
-        (4, 'Single Set'),
+        (2, 'Best of 3'),
+        (3, '3 Sets'),
+        (5, 'Best of 5'),
+        (1, 'Single Set');
 
-    - 4. The Log_Set_Scores table tracks final score of each set by match and set. New entries are generated at the completion of each set. set_id cycles from 1 to 3 or 1 to 5 for each match_id depending on rules set in the Matches table
+  - **Live Data Collection ** Data from each possession is appended to a dataframe to track the progress of the match/set. VolleyStat must be able to append the logs collected during the match to the log table in the .
+
+
+    - 4. The Log_Set_Scores table tracks FINAL score of each set by match and set. New entries are generated at the completion of each set. set_id cycles from 1 to 3 or 1 to 5 for each match_id depending on rules set in the Matches table. 
       CREATE TABLE Log_Set_Scores (
           match_id INTEGER,
           set_id INTEGER,
@@ -90,7 +119,7 @@
           FOREIGN KEY (match_id) REFERENCES Matches(match_id)
       );
 
-    - 5. The Log_Rally table tracks the game status at begining of each rally (rally_id) in a match/set. Points_us, points_them, rotation, serve_timestamp, sanctions, and remarks are all tracked as prior to the rally serve. 
+    - 5. The Log_Rally table tracks the game status at begining of each rally (rally_id) in a match/set. Points_us, points_them, rotation, serve_timestamp, sanctions, and remarks are all tracked as PRIOR TO the rally serve. VolleyStat must be able to append the current rally log to the table on completion of a match.
       CREATE TABLE Log_Rally (
           match_id INTEGER NOT NULL,
           set_id INTEGER NOT NULL,
@@ -105,7 +134,7 @@
           FOREIGN KEY (match_id,set_id) REFERENCES Log_Set_Scores(match_id,set_id)
       );
 
-    - 6. The Log_Rotation table tracks the players on the court by their rotation_slot at the begining of each rally (rally_id). 
+    - 6. The Log_Rotation table tracks the players on the court by their rotation_slot at the begining of each rally (rally_id). VolleyStat must be able to append the rotation log to the table on completion of a match.
       CREATE TABLE IF NOT EXISTS Log_Rotation (
           match_id INTEGER,
           set_id INTEGER,
@@ -113,11 +142,11 @@
           rotation_slot INTEGER CHECK(rotation_slot BETWEEN 1 AND 6),
           player_id INTEGER,
           PRIMARY KEY (match_id,set_id,rally_id,rotation_slot),
-          FOREIGN KEY (player_id) REFERENCES Player_Roster(player_id),
+          FOREIGN KEY (player_id) REFERENCES Roster(player_id),
           FOREIGN KEY (match_id,set_id,rally_id) REFERENCES Rally_Log(match_id,set_id,rally_id)
       );
 
-    - 7. The Log_Touch is the heart of the data collection effort. This table tracks the player actions on each touch of each possession. The possession_seq begins with 0 for Serve and 1 for Serve-Receive, it then increments by 2 for each possesion in the ralley.  Thus possession_seq doubles as a serve flag, even values when serving and odd values when receiving. If our team scores a point with an odd possession_seq, the side-out actions are taken. Game aware prompts are used to limit input options and guide the data entry. 
+    - 7. The Log_Touch is the heart of the data collection effort. This table tracks the player actions on each touch of each possession. The possession_seq begins with 0 for Serve and 1 for Serve-Receive, it then increments by 2 for each possesion in the ralley.  Thus possession_seq doubles as a serve flag, even values when serving and odd values when receiving. If our team scores a point with an odd possession_seq, the side-out actions are taken. Game aware prompts are used to limit input options and guide the data entry. VolleyStat must be able to append the touch log to the table on completion of a match.
 
       CREATE TABLE Log_Touch (
           match_id INTEGER NOT NULL,
@@ -125,12 +154,12 @@
           rally_id INTEGER NOT NULL,
           possession_seq INTEGER NOT NULL,
           touch_seq INTEGER NOT NULL CHECK(touch_seq BETWEEN 0 AND 5),
-          touch_id INTEGER,
+          player_id INTEGER,
           touch_type INTEGER NOT NULL,
           touch_result INTEGER NOT NULL,
           touch_quality INTEGER,
           PRIMARY KEY (match_id,set_id,rally_id,possession_seq, touch_seq),
-          FOREIGN KEY (touch_id) REFERENCES Rosters(player_id),
+          FOREIGN KEY (player_id) REFERENCES Roster(player_id),
           FOREIGN KEY (match_id,set_id,rally_id) REFERENCES Log_Rally(match_id,set_id,rally_id),
           FOREIGN KEY (touch_type) REFERENCES Touch_Types(type_id),
           FOREIGN KEY (touch_result) REFERENCES Touch_Results(result_id)
@@ -167,7 +196,7 @@
       
       CREATE TABLE Touch_Qualities (
         quality_id INTEGER PRIMARY KEY,
-        quality_description TEXT NOT NULL,
+        quality_description TEXT NOT NULL
       );
       INSERT INTO Touch_Qualities (quality_id, quality_description) VALUES
         (0, 'ERROR'),
@@ -177,11 +206,10 @@
         (5, 'WEAK'),
         (7, 'STRONG'),
         (8, 'TOOL'),
-        (9, 'FAULT')
-        (10, 'WEAK:NotReturned')
+        (9, 'FAULT'),
+        (10, 'WEAK:NotReturned'),
         (14, 'STRONG:NotReturned');
 
-  - **Live Data Collection ** Data from each possession is appended to a dataframe to track the progress of the match/set. 
 
   ## Core Architecture
   -- **User Interface**: Using Streamlit for the web interface and organize the app into tabs (mobile/tablet-first layout) that map to the app workflows and provide single-tap access to common actions. 
