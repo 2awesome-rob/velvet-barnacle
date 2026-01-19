@@ -18,20 +18,24 @@
           season CHECK(season BETWEEN 25 AND 50),
           club TEXT,
           hometown TEXT,
-          coach TEXT
+          coach TEXT,
+          UNIQUE(team_name, season),
+          UNIQUE(team_abbv, season)
       );
 
-    - 2. The Roster table stores players on Our Teams. This table enables mapping human readable labels (player_name, player_jersey) to player_id for players on Our Teams. Players are assigned to our teams using player_team; tracking players on opponent teams is neither required nor desired. Player position may be used in some prompts, but coaches can change player assignments from set to set, so it is NOT constraining. Roster will generally be static throughout the season, with few changes. Any need to update/modify can be handeled in a separate management application for now. VolleyStat must be able to load players for a selected team from the db table.
+    - 2. The Roster table stores players on our teams (not opponent teams). This table enables mapping human readable labels (player_name, player_jersey) to player_id for players on our teams. Players are assigned to our teams using player_team; tracking players on opponent teams is neither required nor desired. Player position may be used in some prompts, but coaches can change player assignments from set to set, so it is NOT constraining. Roster will generally be static throughout the season, with few changes. Any need to update/modify can be handeled in a separate management application for now. VolleyStat must be able to load players for a selected team from the db table.
       CREATE TABLE Roster (
           player_id INTEGER PRIMARY KEY AUTOINCREMENT,
           player_name TEXT NOT NULL,
           player_last_name TEXT,
           player_jersey INTEGER NOT NULL CHECK(player_jersey BETWEEN 0 AND 99),
           position_id INTEGER,
-          player_team INTEGER NOT NULL,
-          FOREIGN KEY (player_team) REFERENCES Teams(team_id), 
+          team_id INTEGER NOT NULL,
+          player_captain BOOL DEFAULT FALSE,
+          FOREIGN KEY (team_id) REFERENCES Teams(team_id), 
           FOREIGN KEY (position_id) REFERENCES Positions(position_id), 
-          UNIQUE(player_team, player_jersey)
+          UNIQUE(team_id, player_jersey),
+          UNIQUE(player_name, player_last_name)
       )
     Positions lookup tables is loaded as a dictionary and enable us to map multiple display options for a position. This table is static and should only be updated by the app developer.
 
@@ -41,14 +45,15 @@
         position_abbv TEXT NOT NULL
       );
       INSERT INTO Positions (position_name, position_abbv) VALUES
-        ("Setter", 'S'),
-        ("Outside Hitter", 'OH'),
-        ("Middle Blocker", 'M'),
-        ("Rightside Hitter", 'RS'),
-        ("Libero", 'L'),
-        ("Serve Specialist", 'SS'),
-        ("Defensive Specialist", 'DS'),
-        ("Utility", 'U');
+        ("setter", 'S'),
+        ("outside hitter", 'OH'),
+        ("middle blocker", 'M'),
+        ("rightside hitter", 'RS'),
+        ("opposite hitter", 'OP'),
+        ("serve specialist", 'SS'),
+        ("defensive specialist", 'DS'),
+        ("libero", 'L'),
+        ("utility", 'U');
 
 
     - 3. The Schedule table stores the schedule for our teams. This table enables tracking each match and the associated match rules. Adding new matches is important throughout the season. An entry in the Schedule table is required prior to data collection. VolleyStat must be able to load scheduled Matches, add new Matches to the schedule, and update Matches when completed.
@@ -75,36 +80,36 @@
     Match_Types, Match_Rules, and Match_Criteria lookup tables are loaded as dictionaries and enable us to set the type, rules, and victory criteria for each match. These tables are static and should only be updated by the app developer.
 
       CREATE TABLE Match_Types(
-	        type_id INTEGER PRIMARY KEY,
+	        type_id INTEGER PRIMARY KEY AUTOINCREMENT,
 	        match_type TEXT UNIQUE NOT NULL
       );
       INSERT INTO Match_Types (type_id, match_type) VALUES
-        (1,	'League'),
-        (2,	'Tournament'),
-        (5,	'Scrimmage');
+        (5,	'league'),
+        (3,	'tournament'),
+        (1,	'scrimmage');
 
       CREATE TABLE Match_Rules (
           rule_id INTEGER PRIMARY KEY AUTOINCREMENT,
-          rule_surface TEXT NOT NULL,
+          rule_surface TEXT,
           rule_size INT NOT NULL,
           rule_description TEXT,
-          UNIQUE (rule_surface, rule_description)
+          UNIQUE (rule_surface, rule_size, rule_description)
       );
       INSERT INTO Match_Rules (rule_surface, rule_size) VALUES
-        ('Court', 6),
-        ('Beach', 2),
-        ('Grass', 3),
-        ('Court', 4);
+        ('court', 6),
+        ('beach', 2),
+        ('grass', 3),
+        ('court', 4);
 
       CREATE TABLE Match_Criteria(
           criteria_id INTEGER PRIMARY KEY,
           criteria_description TEXT UNIQUE NOT NULL
       );
       INSERT INTO Match_Criteria (criteria_id, criteria_description) VALUES
-        (2, 'Best of 3'),
-        (3, '3 Sets'),
-        (5, 'Best of 5'),
-        (1, 'Single Set');
+        (2, 'best of 3'),
+        (3, '3 sets'),
+        (5, 'best of 5'),
+        (1, 'single set');
 
   - **Live Data Collection ** Data from each possession is appended to a dataframe to track the progress of the match/set. VolleyStat must be able to append the logs collected during the match to the log table in the .
 
@@ -139,6 +144,7 @@
           match_id INTEGER,
           set_id INTEGER,
           rally_id INTEGER,
+          rotation INTEGER,
           rotation_slot INTEGER CHECK(rotation_slot BETWEEN 1 AND 6),
           player_id INTEGER,
           PRIMARY KEY (match_id,set_id,rally_id,rotation_slot),
@@ -166,49 +172,103 @@
           FOREIGN KEY (touch_quality) REFERENCES Touch_Qualities(quality_id)
       );
 
-    The touch_seq is {0: SERVE, 1: ONE, 2: TWO, 3: THREE, 4: BLOCK, 5: BLOCK}. Two values for block are required to support logging and crediting a block with assist. touch_type, touch_result, and touch_quality lookup tables areloaded as dictionaries and enable us to track and score each touch. These tables are static and should only be updated by the app developer.
+    Two values for block are required to support logging and crediting a block with assist. touch_type, touch_result, and touch_quality lookup tables areloaded as dictionaries and enable us to track and score each touch. These tables are static and should only be updated by the app developer.
+      CREATE TABLE Touch_Seq (
+        touch_seq INTEGER PRIMARY KEY,
+        touch_sequence TEXT NOT NULL
+      );
+      INSERT INTO Touch_Seq (touch_seq, touch_sequence) VALUES
+            (0, 'SERVE'), 
+            (1, 'ONE'),
+            (2, 'TWO'),
+            (3, 'THREE'),
+            (4, 'BLOCK'),
+            (5, 'BLOCK');
 
       CREATE TABLE Touch_Types (
         type_id INTEGER PRIMARY KEY,
         touch_type TEXT UNIQUE NOT NULL
       );
       INSERT INTO Touch_Types (type_id, touch_type) VALUES
-        (1, 'SERVE'),
-        (2, 'BLOCK'),
-        (3, 'DIG'),
-        (4, 'PASS'),
-        (5, 'SET'),
-        (6, 'ATTACK'),
-        (7, 'TEAM_ERROR');
+        (0, 'SERVE'),
+        (10, 'PASS'),
+        (20, 'SET'),
+        (30, 'ATTACK'),
+        (40, 'BLOCK'),
+        (60, 'DIG'),
+        (70, 'TEAM_ERROR');
       
       CREATE TABLE Touch_Results (
         result_id INTEGER PRIMARY KEY,
-        touch_result TEXT UNIQUE NOT NULL
+        touch_result TEXT NOT NULL
       );
       INSERT INTO Touch_Results (result_id, touch_result) VALUES
-        (1, 'TOUCH'),
-        (2, 'ZERO'),
-        (3, 'ERROR'),
-        (4, 'ASSIST'),
+        (0, 'ZERO'),
+        (1, 'OVER - IN PLAY'),
         (5, 'ACE'),
-        (6, 'KILL'),
-        (7, 'STUFF');
+        (6, 'ERROR - SHORT'),
+        (7, 'ERROR - OUT OF BOUNDS'),
+        (8, 'ERROR - FAULT'),
+    		(9, 'ERROR'),        
+		    (10, 'ZERO'),
+        (11, 'PASS - 1'),
+        (12, 'PASS - 2'),
+        (13, 'PASS - 3'),
+        (15, 'OVER PASS - IN PLAY'),
+        (17, 'ERROR - 0'),
+        (18, 'ERROR - FAULT'),
+        (19, 'ERROR'),
+        (20, 'ZERO'),
+  	  	(21, 'SET TO OUTSIDE'),
+		    (22, 'SET TO MIDDLE'),
+	  	  (23, 'SET TO RIGHTSIDE'),
+  		  (24, 'SET TO BACKROW'),
+	    	(25, 'SET - DUMP/OVER'),
+        (26, 'SET - DUMP/KILL'),
+  		  (27, 'ERROR - UNPLAYABLE'),
+	    	(28, 'ERROR - FAULT'),
+	  	  (29, 'ERROR'),
+  		  (30, 'ZERO'),
+        (31, 'OVER - IN PLAY'),
+        (32, 'FREE BALL'),
+        (33, 'KILL'),
+        (34, 'FREE BALL KILL'),
+        (36, 'ERROR - SHORT'),
+        (37, 'ERROR - OUT OF BOUNDS'),
+        (38, 'ERROR - FAULT'),
+    		(39, 'ERROR'),
+        (40, 'ZERO'),
+        (41, 'BLOCK - IN PLAY'),
+        (42, 'TIP - IN PLAY'),
+		    (44, 'STUFF'),
+    		(45, 'STUFF - ASSISTED'),
+		    (46, 'ERROR - SHORT'),
+        (47, 'ERROR - TOOL'),
+        (48, 'ERROR - FAULT'),
+		    (49, 'ERROR'),
+        (60, 'ZERO'),
+        (61, 'PASS'),
+        (65, 'OVER - IN PLAY'),
+        (68, 'MISS'),
+		    (69, 'ERROR'),
+		    (70, 'ZERO'),
+        (77, 'ERROR - CAMPFIRE'),
+        (78, 'ERROR - PWNED'),
+        (79, 'ERROR');
       
       CREATE TABLE Touch_Qualities (
         quality_id INTEGER PRIMARY KEY,
         quality_description TEXT NOT NULL
       );
       INSERT INTO Touch_Qualities (quality_id, quality_description) VALUES
-        (0, 'ERROR'),
-        (1, 'FAIR'),
-        (2, 'GOOD'),
-        (3, 'PERFECT'),
-        (5, 'WEAK'),
-        (7, 'STRONG'),
-        (8, 'TOOL'),
-        (9, 'FAULT'),
-        (10, 'WEAK:NotReturned'),
-        (14, 'STRONG:NotReturned');
+        (1, 'POOR'),
+        (2, 'FAIR'),
+        (4, 'GOOD'),
+        (5, 'PERFECT'),
+        (10, 'WEAK'),
+        (15, 'STRONG'),
+        (20, 'SAD'),
+        (25, 'EPIC');
 
 
   ## Core Architecture
@@ -256,33 +316,7 @@
     - `rotation`: Current player rotation (1-6)
     - `possession_seq`: Tracks serve/return and step sequence in rally
 
-  ### Data Structure Patterns
-  - Each game event is stored as a row in the DataFrame with:
-    - Player positions and jersey numbers
-    - Touch sequences (serve, block, 3 touches)
-    - Sanctions
-  - Example DataFrame schema:
-  ```python
-  {
-      "position_1": int,  # Jersey numbers for each position
-      "position_2": int,
-      ...
-      "rotation": int,
-      "touch_serve": Optional[str],
-      "touch_block": Optional[str],
-      "touch_block_asst": Optional[str],
-      "touch_1": Optional[str],
-      "touch_2": Optional[str],
-      "touch_3": Optional[str],
-      "sanctions": Optional[str]
-  }
-  ```
-
-  ## Common Operations
-  - Use `reset_rally_results()` to clear per-rally state
-  - Call `add_new_row()` to record a new game event
-  - Point scoring functions (`point_us()`, `point_them()`) handle rotation changes automatically
-
+  
   ## UI Schematics
 
   - Theme and touch targets
