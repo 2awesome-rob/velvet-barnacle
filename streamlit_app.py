@@ -487,17 +487,18 @@ def start_set(match_teams: List[str]) -> None:
     """
     # user assigns first rotation, and first serve
     st.markdown("---")
-    start_col = st.columns([1, 2])
-    st.session_state.rotation = start_col[0].slider("Start in Rotation:",
-        min_value=1,
-        max_value=NUM_PLAYERS[st.session_state.match["set_rules"]],
-        width=200,
-        value=1)
-    first_serve = start_col[1].radio("First to serve:", 
-        match_teams,
-        index=0, 
-        horizontal=True)
-    player_options = list(st.session_state.roster.keys())
+    start_col = st.columns([1, 1, 1])
+    with start_col[0]:
+        st.session_state.rotation = st.slider("Start in Rotation:",
+            min_value=1,
+            max_value=NUM_PLAYERS[st.session_state.match["set_rules"]],
+            width=200,
+            value=1)
+        first_serve = st.radio("First to serve:", 
+            match_teams,
+            index=0, 
+            horizontal=True)
+        player_options = list(st.session_state.roster.keys())
 
     # reset session state variables for new set
     st.session_state.rally_id = 0
@@ -523,19 +524,20 @@ def start_set(match_teams: List[str]) -> None:
     # user assigns liberos
     while len(st.session_state.liberos) < 2:
         st.session_state.liberos.append(None)
-    for i in range(2):
-        try:
-            idx = st.session_state.liberos[i]
-            idx = player_options.index(st.session_state.liberos[i])
-        except:
-            idx = None
-        new_lib = start_col[i].selectbox(f"Libero {i+1}",
-            player_options,
-            format_func = lambda o: f"# {o} {st.session_state.roster[o]}",
-            index=idx
-            )
-        if new_lib:
-            st.session_state.liberos[i] = int(new_lib)
+    with start_col[1]:
+        for i in range(2):
+            try:
+                idx = st.session_state.liberos[i]
+                idx = player_options.index(st.session_state.liberos[i])
+            except:
+                idx = None
+            new_lib = st.selectbox(f"Libero {i+1}",
+                player_options,
+                format_func = lambda o: f"# {o} {st.session_state.roster[o]}",
+                index=idx
+                )
+            if new_lib:
+                st.session_state.liberos[i] = int(new_lib)
     
     # draw a "net" line
     st.markdown('<hr style="border-color: #FF69B4;">', unsafe_allow_html=True)
@@ -588,13 +590,15 @@ def start_set(match_teams: List[str]) -> None:
 
 def display_lineup() -> None:
     """displays current lineup based on session state"""
-    st.markdown(f" -- Substitutions Remaining: {st.session_state.subs} -- Timeouts Remaining: {st.session_state.timeouts} --")
-    st.markdown("---")
+    st.markdown(f"<h4 style='text-align: center'> -- Substitutions Remaining: <span style='color:#FF69B4'>*{st.session_state.subs}*</span>" + 
+                f"-- Timeouts Remaining: <span style='color:#FF69B4'>*{st.session_state.timeouts}*</span> --</h4>",
+                 unsafe_allow_html=True)
     if int(NUM_PLAYERS[st.session_state.match["set_rules"]]) == 6:
         players_col = st.columns(3)
     else: 
         players_col = st.columns(2)
     front_row, back_row = get_player_rotation()
+    #TODO flag libero rotating to front row
     for i, key in enumerate(front_row):
         with players_col[i]:
             st.write(f"#{st.session_state.lineup[key]} {st.session_state.roster[st.session_state.lineup[key]]}")
@@ -929,7 +933,7 @@ def our_play() -> None:
         touches.append(touch)
         results.append(result)
         if None not in [player, touch, result]:
-            if ("KILL" in RESULT[result].upper()) or ("ERROR" in RESULT[result].upper()) or ("OVER" in RESULT[result].upper()):
+            if ("KILL" in RESULT[result].upper()) or ("ERROR" in RESULT[result].upper()) or ("OVER" in RESULT[result].upper())or ("MISS" in RESULT[result].upper()):
                 cols = st.columns(2)
                 if cols[1].button("Record Volley"):
                     for i in range(len(players)): 
@@ -941,7 +945,7 @@ def our_play() -> None:
                             log_touch(players[i], seqs[i], touches[i], results[i])
                     if "KILL" in RESULT[result].upper():
                         score_point(True)
-                    elif "ERROR" in RESULT[result].upper():
+                    elif "ERROR" in RESULT[result].upper() or "MISS" in RESULT[result].upper():
                         score_point(False)
                     elif "OVER" in RESULT[result].upper():
                         over_net()
@@ -962,6 +966,7 @@ def dead_ball_actions() -> None:
             format_func = lambda o: f"# {o} {st.session_state.roster[o]}",
             index=None)
         if sub_in is not None and sub_out is not None:
+            #TODO prevent libero from being subbed into front row
             if st.button("Subsitute"):
                 for key, val in st.session_state.lineup.items():
                     if val == sub_out:
