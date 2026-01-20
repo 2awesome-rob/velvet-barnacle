@@ -32,6 +32,7 @@
           position_id INTEGER,
           team_id INTEGER NOT NULL,
           player_captain BOOL DEFAULT FALSE,
+          starter INTEGER DEFAULT 0,
           FOREIGN KEY (team_id) REFERENCES Teams(team_id), 
           FOREIGN KEY (position_id) REFERENCES Positions(position_id), 
           UNIQUE(team_id, player_jersey),

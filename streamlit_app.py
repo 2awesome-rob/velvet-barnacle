@@ -36,6 +36,14 @@ def load_roster_from_database(team_ids:list, db_path:str=DB_FILE) -> pd.DataFram
     t_placeholders = ",".join(["?"] * len(team_ids))
     try:
         with sqlite3.connect(db_path) as conn:
+            # Ensure 'starter' column exists
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA table_info(Roster)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'starter' not in columns:
+                cursor.execute("ALTER TABLE Roster ADD COLUMN starter INTEGER DEFAULT 0")
+                conn.commit()
+            
             df_poss = pd.read_sql_query("SELECT * FROM Positions", conn)
             long_position = {row["position_id"]: row["position_name"] for
                              _, row in df_poss.iterrows()}
@@ -348,7 +356,7 @@ def assign_starting_lineup(roster: pd.DataFrame) -> None:
     # first try to assign based on starter column
     if len(roster[roster['starter'] >= 1]['player_jersey'].tolist()) >= team_size:
         for i in range(1, team_size+1):
-            st.session_state.lineup[i] = int(roster[roster['starter'] == i].loc['player_jersey'])
+            st.session_state.lineup[i] = int(roster[roster['starter'] == i]['player_jersey'].iloc[0])
         return
     # fallback to assigning based on positions
     assigned = []
