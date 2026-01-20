@@ -773,7 +773,6 @@ def over_net() -> None:
     st.session_state.possession_id += 2
     st.session_state.defend = False
 
-
 def our_serve() -> None:
     """
     Identifies server and serve result
@@ -1013,7 +1012,6 @@ def whistle_actions() -> None:
             st.session_state.possession_id = 0
         st.rerun()
 
-
 def display_game_over() -> None:
     st.markdown("# Game Over")
     st.markdown(f"#{match_teams[0]}: {st.session_state.sets_us} ")
@@ -1028,8 +1026,19 @@ def display_game_over() -> None:
         (st.session_state.touch_log_df['touch_result'] == 5)].groupby(
             by = ['player_id']).size().reset_index(name='aces')
     serves_df = serves_df.merge(aces_df, on='player_id', how='left').fillna(0)
+    #TODO replace player_id with player name
     serves_df['ace_%'] = (serves_df['aces'] / serves_df['serves'] * 100).round(1)
     st.dataframe(serves_df)
+
+    st.markdown("#### Attacks:")
+    attacks_df = st.session_state.touch_log_df[
+        st.session_state.touch_log_df['touch_type'] == 30].groupby('player_id').agg(
+            attacks=('touch_result', 'size'),
+            kills=('touch_result', lambda x: (x==31).sum())
+        ).reset_index()
+    #TODO replace player_id with player name
+    attacks_df['kill_%'] = (attacks_df['kills'] / attacks_df['attacks'] * 100).round(1)
+    st.dataframe(attacks_df[['player_id', 'attacks', 'kills', 'kill_%']]) 
 
     st.markdown("#### Serve Receive:")
     serve_receive_df = st.session_state.touch_log_df[
@@ -1041,14 +1050,9 @@ def display_game_over() -> None:
         avg_pass=('touch_result', 'mean')
     ).reset_index()
     # Map result ids to scores: 11=1, 12=2, 13=3
+    #TODO replace player_id with player name
     passes_df['avg_pass_score'] = passes_df['avg_pass'].map({11:1, 12:2, 13:3}).round(2)
     st.dataframe(passes_df[['player_id', 'passes', 'avg_pass_score']])
-    st.markdown("---")
-    st.dataframe(st.session_state.touch_log_df.tail(5))
-    st.dataframe(st.session_state.rally_log_df.tail(5))
-    st.dataframe(st.session_state.rotation_log_df.tail(5))
-    st.dataframe(st.session_state.set_score_log_df.tail(5))
-    st.markdown("---")
 
 # --- Game Tracking Page ---
 with tabs[1]:
