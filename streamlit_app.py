@@ -1043,7 +1043,13 @@ def display_game_over() -> None:
     # Map result ids to scores: 11=1, 12=2, 13=3
     passes_df['avg_pass_score'] = passes_df['avg_pass'].map({11:1, 12:2, 13:3}).round(2)
     st.dataframe(passes_df[['player_id', 'passes', 'avg_pass_score']])
-
+    st.markdown("---")
+    st.dataframe(st.session_state.touch_log_df.tail(5))
+    st.dataframe(st.session_state.rally_log_df.tail(5))
+    st.dataframe(st.session_state.rotation_log_df.tail(5))
+    st.dataframe(st.session_state.set_score_log_df.tail(5))
+    st.markdown("---")
+    
 # --- Game Tracking Page ---
 with tabs[1]:
     if not st.session_state.match_id:

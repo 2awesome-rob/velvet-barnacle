@@ -215,8 +215,8 @@
       CREATE TABLE Log_Set_Scores (
           match_id INTEGER,
           set_id INTEGER,
-          us_score INTEGER,
-          them_score INTEGER,
+          points_us INTEGER,
+          points_them INTEGER,
           PRIMARY KEY (match_id,set_id),
           FOREIGN KEY (match_id) REFERENCES Matches(match_id)
       );
