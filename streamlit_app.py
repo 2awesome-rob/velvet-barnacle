@@ -731,7 +731,7 @@ def score_point(us:bool=True) -> None:
             "points_us" : st.session_state.score_us,
             "points_them" : st.session_state.score_them,
         }
-        st.session_state.rally_log_df.loc[row] = score
+        st.session_state.set_score_log_df.loc[row] = score
         st.session_state.game_over = _check_for_win()
         if st.session_state.game_over == False:
             st.session_state.active_set = False
@@ -1049,7 +1049,7 @@ def display_game_over() -> None:
     st.dataframe(st.session_state.rotation_log_df.tail(5))
     st.dataframe(st.session_state.set_score_log_df.tail(5))
     st.markdown("---")
-    
+
 # --- Game Tracking Page ---
 with tabs[1]:
     if not st.session_state.match_id:
