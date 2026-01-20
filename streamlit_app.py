@@ -12,29 +12,6 @@ from zoneinfo import ZoneInfo
 
 from typing import Tuple, List, Optional
 
-### not currently used
-from dataclasses import asdict, dataclass
-from typing import TypedDict, cast
-
-# -----------------------------------------------------------------------------
-# class declarations
-# -----------------------------------------------------------------------------
-### TODO evaluate - are dataclasses useful - should we update and use or delete?
-@dataclass
-class TouchLog:
-    """
-    Data class representing a single touch in a possession
-    """
-    match_id: int
-    set_id: int
-    rally_id: int
-    possession_id: int
-    touch_seq: int
-    player_id: int
-    touch_type: int
-    touch_result: int
-    touch_quality: int
-
 # -----------------------------------------------------------------------------
 # Global Constants and Session State Initialization
 # -----------------------------------------------------------------------------
@@ -98,11 +75,11 @@ def load_schedule_from_database(team_ids:list, db_path: str = DB_FILE) -> pd.Dat
 # --- helper functions to load from database and cache ---
 @st.cache_data
 def load_dictionaries_from_database(db_path:str = DB_FILE) -> Tuple[
-    dict, dict, dict, dict, dict, dict]:
+    dict, dict, dict, dict, dict]:
     """
-    Loads, returns, and caches 6 dictionaries from the database
+    Loads, returns, and caches 5 dictionaries from the database
     3 dictionaries are used to describe matches
-    3 dictionaries are used to describe touches
+    2 dictionaries are used to describe touches
     """
     try:
         with sqlite3.connect(db_path) as conn:
@@ -126,11 +103,7 @@ def load_dictionaries_from_database(db_path:str = DB_FILE) -> Tuple[
             touch_results = {row["result_id"]:row["touch_result"] for
                              _, row in df.iterrows()}
 
-            df = pd.read_sql_query("SELECT * FROM Touch_Qualities", conn)
-            touch_quality = {row["quality_id"]:row["quality_description"] for
-                             _, row in df.iterrows()}
-
-        return match_types, match_num_players, match_criteria, touch_types, touch_results, touch_quality
+        return match_types, match_num_players, match_criteria, touch_types, touch_results
 
     except sqlite3.Error as e:
         print(f"SQLite error: {e} when loading dictionaries")
@@ -141,9 +114,9 @@ def load_data_from_database(season: int, db_path: str = DB_FILE) -> Tuple[
     pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Load, returns, and CACHES three dataframes from the database.
-    - Filters Teams table by season.
-    - Loads Rosters only for loaded teams.
-    - Loads incomplete matches for teams in the selected season.
+    - Loads Teams from selected season.
+    - Loads Rosters from teams in selected season.
+    - Loads incomplete matches for teams in selected season.
     """
     df_teams = load_teams_from_database(season, db_path)
     team_ids = df_teams.index.tolist()
@@ -165,8 +138,12 @@ def initialize_session_state() -> None:
 
 def initialize_match(m_id:int, df:pd.DataFrame) -> None:
     """
-    Reset session state variables.
+    initialize session state variables for a new match given a match_id and schedule dataframe.
     """
+    # Add match_id and data to session state
+    st.session_state.match_id = m_id
+    st.session_state.match = df.loc[st.session_state.match_id].to_dict()
+    st.session_state.them_team_id = int(st.session_state.match["them_team_id"])
     # match Dataframes - tabular logs of the match
     st.session_state.set_score_log_df = pd.DataFrame(columns=[
         "match_id", "set_id", "points_us", "points_them"])
@@ -180,33 +157,26 @@ def initialize_match(m_id:int, df:pd.DataFrame) -> None:
         "match_id", "set_id", "rally_id", 
         "possession_seq", "touch_seq", "player_id",
         "touch_type", "touch_result", "touch_quality"])
-    # Add match_id and data to session state
-    st.session_state.match_id = m_id
-    st.session_state.match = df.loc[st.session_state.match_id].to_dict()
-    st.session_state.them_team_id = int(st.session_state.match["them_team_id"])
-    # session state variables
-    # keep track of where we are, table keys
+    # track of where we are in the match
     st.session_state.set_id = 1
     st.session_state.rally_id = 0
     st.session_state.possession_id = 0
     st.session_state.touch_seq = 0
+    # track where players are
     st.session_state.rotation = 1
     st.session_state.lineup = {}
     st.session_state.liberos = []
-    # current score
+    # track scores
     st.session_state.points_to_win = st.session_state.match['winning_score']
     st.session_state.sets_us = 0
     st.session_state.sets_them = 0
     st.session_state.score_us = 0
     st.session_state.score_them = 0
-    # current flags, status, notes
+    # track flags, status, notes
     st.session_state.game_over = False
     st.session_state.active_set = False
     st.session_state.subs = 0
-    st.session_state.to = 0
-    initialize_rally()
-
-def initialize_rally() -> None:
+    st.session_state.timeouts = 0
     st.session_state.defend = False
     st.session_state.whistle = False
     st.session_state.remarks = ""
@@ -214,12 +184,11 @@ def initialize_rally() -> None:
 
 # --- helper function to establish session state variables ---
 initialize_session_state()
-MATCH_TYPE, NUM_PLAYERS, CRITERIA, TOUCH_TYPE, RESULT, QUALITY = load_dictionaries_from_database(DB_FILE)  
+MATCH_TYPE, NUM_PLAYERS, CRITERIA, TOUCH_TYPE, RESULT = load_dictionaries_from_database(DB_FILE)  
 
 # -----------------------------------------------------------------------------
 # Set up and U/I configuration
 # -----------------------------------------------------------------------------
-
 st.set_page_config(page_title="VStat",
                    layout="wide",
                    page_icon=":volleyball:")
@@ -227,15 +196,18 @@ st.title("🏐 VolleyStat")
 
 tabs = st.tabs([
     "Schedule",
-    "Live Game Track",
-    "Debug"
+    "Live Game Track"
 ])
 
 # -----------------------------------------------------------------------------
 # Scheduling
 # -----------------------------------------------------------------------------
 # --- Helper Utilities ---
-def show_matches(df_schedule: pd.DataFrame, df_teams: pd.DataFrame)->dict:
+def get_scheduled_matches(df_schedule: pd.DataFrame, df_teams: pd.DataFrame)->dict:
+    """
+    displays upcoming matches for selected team 
+    returns a dictionary of match options
+    """
     if df_schedule.empty or df_teams.empty:
         return None
     us_team = st.session_state.us_team_id
@@ -275,6 +247,7 @@ def show_matches(df_schedule: pd.DataFrame, df_teams: pd.DataFrame)->dict:
     return game_dict
 
 def add_new_team(df_teams: pd.DataFrame, season_YY: int) -> pd.DataFrame:
+    """adds a new team to the Teams database table for the selected season"""
     col_1, col_2, col_3 = st.columns(3)
     with col_1:
         st.text_input("Club", key="new_team_club")
@@ -303,6 +276,7 @@ def add_new_team(df_teams: pd.DataFrame, season_YY: int) -> pd.DataFrame:
     return df_teams
 
 def add_new_match(df_teams: pd.DataFrame, df_schedule: pd.DataFrame, them_team_id: int) -> pd.DataFrame:
+    """adds a new match to the Schedule database table"""
     us_abbv = df_teams.loc[st.session_state.us_team_id, "team_abbv"]
     them_abbv = df_teams.loc[them_team_id, "team_abbv"]
     st.write(f"Add New Match between {us_abbv} and {them_abbv}")
@@ -362,9 +336,11 @@ def add_new_match(df_teams: pd.DataFrame, df_schedule: pd.DataFrame, them_team_i
     return df_schedule
 
 def assign_starting_lineup(roster: pd.DataFrame) -> None:
+    """assigns a starting lineup based on roster dataframe and match rules"""
     roster = roster[roster["team_id"]==st.session_state.us_team_id]
     liberos = roster[roster["player_abbv_position"] == "L"]["player_jersey"].tolist()
-    st.session_state.liberos = liberos[:2]
+    if liberos:
+        st.session_state.liberos = liberos[:2]
     role_map = {1: "S", 2: "OH", 3: "M", 4: "RS", 5: "OH", 6: "M"}
     st.session_state.roster = dict(zip(roster["player_jersey"], roster["player_name"]))
     st.session_state.player_ids = dict(zip(roster["player_jersey"], roster.index))
@@ -372,7 +348,7 @@ def assign_starting_lineup(roster: pd.DataFrame) -> None:
     assigned = []
     for i in range(1, team_size+1):
         #TODO add a "player_starter" column to table in db and roster
-        # enabling user to identify role 1 to 6, use below code as fallback
+        # enabling user to identify starting role 1 to 6, keep below code as fallback
         pos = role_map[i]
         df_t = roster[~roster["player_jersey"].isin(assigned)]
         df_p = df_t[df_t["player_abbv_position"] == pos]
@@ -388,7 +364,10 @@ def assign_starting_lineup(roster: pd.DataFrame) -> None:
 def get_player_rotation() -> Tuple[list, list]:
     """
     returns two lists of integers
-    list is rotation positions based on team size and current rotation value
+    first list is front row rotation positions based on team size and current rotation
+    second list is back row rotation positions based on team size and current rotation
+    6 Player Example (r=1): front_row = [3,2,1], back_row = [4,5,6]
+    used to layout player selection in U/I
     """
     r = st.session_state.rotation
     team_size = int(NUM_PLAYERS[st.session_state.match["set_rules"]])
@@ -410,13 +389,6 @@ def get_player_rotation() -> Tuple[list, list]:
         return [], []
     return front_row , back_row
 
-# --- Debugging Page ---------------------------------------------------------
-with tabs[2]:
-
-    for i in [MATCH_TYPE, NUM_PLAYERS, CRITERIA, TOUCH_TYPE, RESULT, QUALITY]:
-        st.write(i)
-#    st.write(st.session_state)
-
 # --- Scheduling Page ---------------------------------------------------------
 with tabs[0]:
     subtabs = st.tabs([
@@ -425,12 +397,12 @@ with tabs[0]:
         "Add Match"
     ])
 
-    ### Warning that a Match has already been selected
+    # Warning that a Match has already been selected
     if st.session_state.match_id is not None:
         st.warning(f"Match {st.session_state.match_id} is already in progress. Starting a new one will overwrite it.")
         st.markdown("---")
 
-    ### Select season and team
+    # Select season and team
     colA1, colA2 = st.columns(2)
     with colA1:
         season_YY = st.number_input("Select Season",
@@ -438,19 +410,19 @@ with tabs[0]:
                         key="select_season_key", disabled=True) - 2000
         df_teams, df_roster, df_schedule = load_data_from_database(season_YY, DB_FILE)
     with colA2:
-        available_team_ids = df_roster["team_id"].unique() # only teams with rosters are available for our team
+        available_team_ids = df_roster["team_id"].unique() # only teams with rosters are available for "our" team
         available_teams = df_teams[df_teams.index.isin(available_team_ids)]
         selected_abbr = st.selectbox("Select Team", available_teams["team_abbv"])
         if len(available_teams) > 0:
             st.session_state.us_team_id = int(available_teams.loc[
                 available_teams["team_abbv"] == selected_abbr].index[0])
 
-    ### Add Opponent
+    # Add New Opponent
     with subtabs[1]:
         df_teams = add_new_team(df_teams, season_YY)
         st.dataframe(df_teams, column_order=['club', 'team_name', 'team_abbv'], hide_index=True)
 
-    ### Add Match against Opponent
+    # Add New Match against Opponent
     with subtabs[2]:
         idx = [i for i in df_teams.index.to_list() if i != st.session_state.us_team_id]
         opponent_teams = df_teams.loc[idx]
@@ -461,9 +433,9 @@ with tabs[0]:
             df_schedule = add_new_match(df_teams, df_schedule, them_team_id)
         else: st.info("No available teams to play")
     
-    #TODO make this line pink
-    st.markdown("---")
-    available_match_ids = show_matches(df_schedule, df_teams)
+    st.markdown('<hr style="border-color: #FF69B4;">', unsafe_allow_html=True)
+    # Select Match to Track
+    available_match_ids = get_scheduled_matches(df_schedule, df_teams)
     if available_match_ids is None:
         st.info("No scheduled matches")
     else:
@@ -481,54 +453,27 @@ with tabs[0]:
 # --- Helper Utilities ---
 
 def display_scoreboard(match_teams: List[str]) -> None:
-    # show header with teams and scores
+    """
+    displays a header showing a scoreboard with team abbreviations and scores
+    """
     header_col = st.columns([1, 3, 1])
     with header_col[0]:
         st.metric(f"Sets Us: {st.session_state.sets_us}",
             st.session_state.score_us)
     with header_col[1]:
-        ### TODO center align
-        st.subheader(f"{match_teams[0]}   vs   {match_teams[1]}")
+        st.markdown(f"<h3 style='text-align: center; color: white;'>{match_teams[0]}   vs   {match_teams[1]}</h3>", unsafe_allow_html=True)
     with header_col[2]:
         st.metric(f"Sets Them: {st.session_state.sets_them}",
             st.session_state.score_them)        
     return
 
 def start_set(match_teams: List[str]) -> None:
-    # at start of set - user assigns first rotation, and first serve
-    st.markdown("---")
-    start_col = st.columns([1, 2])
-    st.session_state.rotation = start_col[0].slider("Start in Rotation:",
-        min_value=1,
-        max_value=NUM_PLAYERS[st.session_state.match["set_rules"]],
-        width=200,
-        value=1)
-    first_serve = start_col[1].radio("First to serve:", 
-        match_teams,
-        index=0, 
-        horizontal=True)
-    ### TODO confirm liberos (up to 2) - default display based on positions
-    # at start of set - reset rally, possession, points to win
-    player_options = list(st.session_state.roster.keys())
-    # user assigns players
-    for i in range(2):
-        try:
-            idx = st.session_state.libero[i]
-        except:
-            idx = None
-        idx = player_options.index(st.session_state.libero[i])
-
-    new_player = start_col[0].selectbox(f"Libero 1",
-            player_options,
-            format_func = lambda o: f"# {o} {st.session_state.roster[o]}",
-            index=idx
-            )
-        if new_player:
-            st.session_state.lineup[key] = int(new_player)
-
-    st.write(st.session_state.liberos)
-    st.session_state.subs = 15
-    st.session_state.to = 2
+    """
+    resets session state variables and
+    displays a header enabling user to assign starting lineup 
+    and initial set configuation
+    """
+    # reset session state variables for new set
     st.session_state.rally_id = 0
     st.session_state.possession_id = 0 if first_serve == match_teams[0] else 1
     def _get_play_to_points() -> int:
@@ -546,16 +491,48 @@ def start_set(match_teams: List[str]) -> None:
             else:
                 return st.session_state.match['winning_score']
     st.session_state.points_to_win = _get_play_to_points()
-    # draw a "net" line
-    # TODO make line pink
+    st.session_state.subs = 15
+    st.session_state.timeouts = 2
+
+    # user assigns first rotation, and first serve
     st.markdown("---")
+    start_col = st.columns([1, 2])
+    st.session_state.rotation = start_col[0].slider("Start in Rotation:",
+        min_value=1,
+        max_value=NUM_PLAYERS[st.session_state.match["set_rules"]],
+        width=200,
+        value=1)
+    first_serve = start_col[1].radio("First to serve:", 
+        match_teams,
+        index=0, 
+        horizontal=True)
+    player_options = list(st.session_state.roster.keys())
+    
+    # user assigns liberos
+    #TODO confirm code block for updating liberos actually works
+    for i in range(2):
+        try:
+            idx = st.session_state.liberos[i]
+            idx = player_options.index(st.session_state.liberos[i])
+        except:
+            idx = None
+        new_lib = start_col[i].selectbox(f"Libero {i+1}",
+            player_options,
+            format_func = lambda o: f"# {o} {st.session_state.roster[o]}",
+            index=idx
+            )
+        if new_lib:
+            st.session_state.liberos[i] = int(new_lib)
+    
+    # draw a "net" line
+    st.markdown('<hr style="border-color: #FF69B4;">', unsafe_allow_html=True)
     # layout players below net based on set_rules
     if int(NUM_PLAYERS[st.session_state.match["set_rules"]]) == 6:
         players_col = st.columns(3)
     else: 
         players_col = st.columns(2)
-    
     front_row, back_row = get_player_rotation()
+    
     # user assigns players
     for i, key in enumerate(front_row):
         idx = player_options.index(st.session_state.lineup[key])
@@ -597,16 +574,13 @@ def start_set(match_teams: List[str]) -> None:
             st.rerun()
 
 def display_lineup() -> None:
-    #TODO update next line to show numbers in pink
-    st.write(f"-- Current Rotation: {st.session_state.rotation}" +
-        f" -- Subsitutions Remaining: {st.session_state.subs}" +
-        f" -- Timeouts Remaining: {st.session_state.to} --")
+    """displays current lineup based on session state"""
+    st.markdown(f" -- <span style='color: #FF69B4;'>Substitutions Remaining: {st.session_state.subs}</span> -- <span style='color: #FF69B4;'>Timeouts Remaining: {st.session_state.timeouts}</span> --")
     st.markdown("---")
     if int(NUM_PLAYERS[st.session_state.match["set_rules"]]) == 6:
         players_col = st.columns(3)
     else: 
         players_col = st.columns(2)
-    
     front_row, back_row = get_player_rotation()
     for i, key in enumerate(front_row):
         with players_col[i]:
@@ -616,12 +590,14 @@ def display_lineup() -> None:
         with players_col[i]:
             st.write(f"#{st.session_state.lineup[key]} {st.session_state.roster[st.session_state.lineup[key]]}")
 
-def over_net() -> None:
-    """increments the rally_step tracker"""
-    st.session_state.possession_id += 2
-    st.session_state.defend = False
-
 def log_touch(jersey: int, seq:int, touch:int, result:int, quality:int=None) -> None:
+    """logs a touch to the touch_log_df dataframe in session state
+    Args:
+        jersey (int): player jersey number
+        seq (int): touch sequence number in possession
+        touch (int): touch type id
+        result (int): touch result id
+        quality (int, optional): touch quality id. Currently not used - Defaults to None."""
     row = len(st.session_state.touch_log_df)
     touch = {
         'match_id': st.session_state.match_id,
@@ -637,6 +613,7 @@ def log_touch(jersey: int, seq:int, touch:int, result:int, quality:int=None) -> 
     st.session_state.touch_log_df.loc[row] = touch
 
 def log_rally_start() -> None:
+    """logs the start of a rally to the rally_log_df and rotation_log_df dataframes in session state"""
     #log serve in start_rally_log
     serve_time = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%H:%M:%S")
     row = len(st.session_state.rally_log_df)
@@ -669,30 +646,42 @@ def log_rally_start() -> None:
         }
         slot |= rot
         st.session_state.rotation_log_df.loc[row] = slot
-    #reset session_state variables
-    initialize_rally()
+    # reset rally-specific session state variables
+    st.session_state.whistle = False
+    st.session_state.remarks = ""
+    st.session_state.sanctions = ""
     return    
 
-def log_set_over() -> None:
-    row = len(st.session_state.set_score_log_df)
-    score = {
-        "match_id": st.session_state.match_id,
-        "set_id" : st.session_state.set_id,
-        "points_us" : st.session_state.score_us,
-        "points_them" : st.session_state.score_them,
-    }
-    st.session_state.rally_log_df.loc[row] = score
-
-def log_game_over() -> None:
-    #TODO append set_score_log_df to Log_SetScores Table in database
-    #TODO append rally_log_df to Log_Rally Table in database
-    #TODO append rotation_log_df to Log_Rotation Table in database
-    #TODO append to touch_log_df to Log_Touch Table in database
-    #TODO update Schedule Table in database to reflect match complete
-    pass
+def log_game_complete(db_path:str=DB_FILE) -> None:
+    """Append all match logs to database tables and mark match as complete."""
+    try:
+        with sqlite3.connect(db_path) as conn:
+            # Append set scores
+            if not st.session_state.set_score_log_df.empty:
+                st.session_state.set_score_log_df.to_sql('Log_Set_Scores', conn, if_exists='append', index=False)
+            
+            # Append rally logs
+            if not st.session_state.rally_log_df.empty:
+                st.session_state.rally_log_df.to_sql('Log_Rally', conn, if_exists='append', index=False)
+            
+            # Append rotation logs
+            if not st.session_state.rotation_log_df.empty:
+                st.session_state.rotation_log_df.to_sql('Log_Rotation', conn, if_exists='append', index=False)
+            
+            # Append touch logs
+            if not st.session_state.touch_log_df.empty:
+                st.session_state.touch_log_df.to_sql('Log_Touch', conn, if_exists='append', index=False)
+            
+            # Update Schedule table to mark match complete
+            cursor = conn.cursor()
+            cursor.execute("UPDATE Schedule SET match_complete = 1 WHERE match_id = ?", (st.session_state.match_id,))
+            conn.commit()
+        
+        st.success("Match logs saved to database and match marked as complete.")
+    except Exception as e:
+        st.error(f"Failed to save match logs: {e}")
 
 def score_point(us:bool=True) -> None:
-    
     def _check_for_win() -> bool:
         """ evalutes set state and logic
         returns True if match is complete, otherwise False
@@ -715,8 +704,17 @@ def score_point(us:bool=True) -> None:
             else: 
                 return False
         
-    def _start_new_set() -> None:
-        log_set_over()
+    def _log_set_complete() -> None:
+        """logs end of set scores and
+        resets session state variables for new set"""
+        row = len(st.session_state.set_score_log_df)
+        score = {
+            "match_id": st.session_state.match_id,
+            "set_id" : st.session_state.set_id,
+            "points_us" : st.session_state.score_us,
+            "points_them" : st.session_state.score_them,
+        }
+        st.session_state.rally_log_df.loc[row] = score
         st.session_state.game_over = _check_for_win()
         if st.session_state.game_over == False:
             st.session_state.active_set = False
@@ -726,8 +724,10 @@ def score_point(us:bool=True) -> None:
 
     st.session_state.rally_id += 1
     st.session_state.defend = False
+    # score point for us and check for victory
     if us:
         st.session_state.score_us += 1
+        # sideout - rotate if we won the point on their serve
         if st.session_state.possession_id % 2 == 1:
             st.session_state.rotation = (st.session_state.rotation + 1) % NUM_PLAYERS[st.session_state.match["set_rules"]]
         st.session_state.possession_id = 0
@@ -737,21 +737,32 @@ def score_point(us:bool=True) -> None:
             >= st.session_state.score_them + 2
         ):
             st.session_state.sets_us += 1
-            _start_new_set()
+            _log_set_complete()
+    # score point for them and check for victory
     else:
         st.session_state.score_them += 1
         st.session_state.possession_id = 1
-
         if (
             st.session_state.score_them >= st.session_state.points_to_win
             and st.session_state.score_them
             >= st.session_state.score_us + 2
         ):
             st.session_state.sets_them += 1
-            _start_new_set()
+            _log_set_complete()
     pass
 
+def over_net() -> None:
+    """increments the rally_step tracker"""
+    st.session_state.possession_id += 2
+    st.session_state.defend = False
+
+
 def our_serve() -> None:
+    """
+    Identifies server and serve result
+    logs serve and result, and
+    starts rally
+    """
     #identify server
     _, back_row = get_player_rotation()
     server = st.session_state.lineup[back_row[-1]]
@@ -779,6 +790,9 @@ def our_serve() -> None:
         st.rerun()
 
 def opponent_play() -> bool:
+    """
+    Identifies opponent play and result of opponent possession
+    """
     opp_play = "Serve" if st.session_state.possession_id == 1 else "Volley"
     st.markdown(f"#### {match_teams[1]} to {opp_play}:")
 
@@ -806,7 +820,12 @@ def opponent_play() -> bool:
             st.rerun()
 
 def our_play() -> None:
+    """
+    Identifies our play sequence including block (if any) and up to 3 touches
+    """
     def _our_block()->Tuple[List[int], int]:
+        """identifies blockers and result of block
+        returns: Tuple[List[int], int] - list of blocker jersey numbers and result id"""
         #identify blockers
         front_row, _ = get_player_rotation()
         blocker_options = [st.session_state.lineup[key] for key in front_row]
@@ -898,7 +917,6 @@ def our_play() -> None:
         results.append(result)
         if None not in [player, touch, result]:
             if ("KILL" in RESULT[result].upper()) or ("ERROR" in RESULT[result].upper()) or ("OVER" in RESULT[result].upper()):
-            #TODO update to escape for loop when button is shown
                 cols = st.columns(2)
                 if cols[1].button("Record Volley"):
                     for i in range(len(players)): 
@@ -914,83 +932,101 @@ def our_play() -> None:
                         score_point(False)
                     elif "OVER" in RESULT[result].upper():
                         over_net()
+                    break  # escape the loop after recording
                     st.rerun()
+    #TODO handle case where user wants to record less than 3 touches
+    #TODO handle case where whistle occurs during our play
 
-def display_dead_ball() -> None:
+def dead_ball_actions() -> None:
     st.markdown("---")
     st.markdown("Deadball Actions:")
-    dead_ball_column_A = st.columns([1, 2])
-    with dead_ball_column_A[0]:
-        #TODO update to show names vs jersey numbers
-        #TODO ensure button press updates player display
-        sub_out = st.selectbox("Sub Out",
-            options=list(st.session_state.lineup.values()),
-            format_func = lambda o: f"# {o} {st.session_state.roster[o]}",
-            index=None)
-        sub_in = st.selectbox("Sub In", 
+    dead_ball_columns = st.columns([1, 1])
+    with dead_ball_columns[0]:
+        sub_in = st.selectbox("Subsitute In", 
             options=[j for j in st.session_state.roster.keys() if j not in st.session_state.lineup.values()],
             format_func = lambda o: f"# {o} {st.session_state.roster[o]}",
             index=None)
-        if st.button("Record Sub"):
-            for key, val in st.session_state.lineup.items():
-                if val == sub_out:
-                    st.session_state.lineup[key] = sub_in
-                    st.success(f"Subbed out {sub_out} for {sub_in}")
-                    break
-            #TODO don't decrement subs if player going in/out is a libero
-            st.session_state.subs += -1
-            st.rerun()
-    with dead_ball_column_A[1]:
-        st.session_state.sanctions = st.text_input("Sanctions:", "")
-        st.session_state.remarks = st.text_input("Remarks:", "")
+        sub_out = st.selectbox("Subsitute Out",
+            options=list(st.session_state.lineup.values()),
+            format_func = lambda o: f"# {o} {st.session_state.roster[o]}",
+            index=None)
+        if sub_in is not None and sub_out is not None:
+            if st.button("Subsitute"):
+                for key, val in st.session_state.lineup.items():
+                    if val == sub_out:
+                        st.session_state.lineup[key] = sub_in
+                        st.success(f"Subbed out {sub_out} for {sub_in}")
+                        break
+                # Don't decrement subs if player going in or out is a libero
+                if sub_in not in st.session_state.liberos and sub_out not in st.session_state.liberos:
+                    st.session_state.subs += -1
+                st.rerun()
+    with dead_ball_columns[1]:
+        sanctions = st.text_input("Sanctions:", "")
+        remarks = st.text_input("Remarks:", "")
+        if sanctions or remarks:
+            if st.button("Record"):
+                st.session_state.sanctions = sanctions
+                st.session_state.remarks = remarks
+                st.rerun()
 
     st.markdown("---")
-    dead_ball_column_B = st.columns([1, 1, 1])
-
-    with dead_ball_column_B[0]:
-        add_point = st.radio("Adjust Score:", 
+    if st.checkbox("Uncommon Actions:", value=False):
+        add_point = st.radio("Manual Override Score:", 
             match_teams,
             index=None, horizontal=False)
-        #TODO need buisness rules for ralley that ends in whistle/no point
         if st.button("Adjust + Score"):
             if add_point == match_teams[0]:
-                score_point(True)
+                st.session_state.score_us += 1
             elif add_point == match_teams[1]:
-                score_point(False)
+                st.session_state.score_them += 1
         if st.button("Adjust - Score"):
             if add_point == match_teams[0]:
                 st.session_state.score_us += -1
             elif add_point == match_teams[1]:
                 st.session_state.score_them += -1
-    with dead_ball_column_B[1]:
-        #TODO validate - rewrite undo helper function
-        if st.button("Undo Last"):
-            undo_last_line()
 
-def display_live_ball() -> None:
-    #TODO add functions to support whistle, ending rally w/o point
-    return
+def whistle_actions() -> None:
+    st.markdown("---")
+    if st.button("Whistle - No Point"):
+        st.session_state.rally_id += 1
+        st.session_state.defend = False
+        if st.session_state.possession_id % 2 == 1:
+            st.session_state.possession_id = 1
+        else:
+            st.session_state.possession_id = 0
+        st.rerun()
+
 
 def display_game_over() -> None:
-    st.markdown("## Game Over")
+    st.markdown("# Game Over")
     st.markdown(f"#{match_teams[0]}: {st.session_state.sets_us} ")
     st.markdown(f"#{match_teams[1]}: {st.session_state.sets_them} ")
 
-    #TODO update to show # serves # aces and ace %
     st.markdown("#### Serves:")
     serves_df = st.session_state.touch_log_df[
         st.session_state.touch_log_df['possession_seq'] == 0].groupby(
-            by = ['player_id']).count()
+            by = ['player_id']).size().reset_index(name='serves')
+    aces_df = st.session_state.touch_log_df[
+        (st.session_state.touch_log_df['possession_seq'] == 0) & 
+        (st.session_state.touch_log_df['touch_result'] == 5)].groupby(
+            by = ['player_id']).size().reset_index(name='aces')
+    serves_df = serves_df.merge(aces_df, on='player_id', how='left').fillna(0)
+    serves_df['ace_%'] = (serves_df['aces'] / serves_df['serves'] * 100).round(1)
     st.dataframe(serves_df)
 
-    #TODO update to show # passes # digs average passing score
     st.markdown("#### Serve Receive:")
     serve_receive_df = st.session_state.touch_log_df[
-        st.session_state.touch_log_df['possession_seq'] == 1]
-    serve_receive_df = serve_receive_df[
-        serve_receive_df['touch_seq'] == 1].groupby(
-            by = ['player_id']).count()
-    st.dataframe(serve_receive_df)
+        (st.session_state.touch_log_df['possession_seq'] == 1) &
+        (st.session_state.touch_log_df['touch_seq'] == 1) &
+        (st.session_state.touch_log_df['touch_type'] == 10)]
+    passes_df = serve_receive_df.groupby('player_id').agg(
+        passes=('touch_result', 'size'),
+        avg_pass=('touch_result', 'mean')
+    ).reset_index()
+    # Map result ids to scores: 11=1, 12=2, 13=3
+    passes_df['avg_pass_score'] = passes_df['avg_pass'].map({11:1, 12:2, 13:3}).round(2)
+    st.dataframe(passes_df[['player_id', 'passes', 'avg_pass_score']])
 
 # --- Game Tracking Page ---
 with tabs[1]:
@@ -1002,31 +1038,34 @@ with tabs[1]:
         match_teams = [df_teams.loc[st.session_state.us_team_id, "team_abbv"],
                        df_teams.loc[st.session_state.them_team_id, "team_abbv"]]
         display_scoreboard(match_teams)
-        if st.session_state.active_set == False:
-            start_set(match_teams)
-        else:
-            display_lineup()
-        st.markdown("---")
 
-        # if game is over - take end of game actions
+        # if game is over - skip to end of game actions
         if st.session_state.game_over == True:
-            #TODO - mark game as complete
-            #TODO - store dfs in database
+            log_game_complete()
             display_game_over()
 
-        elif st.session_state.active_set == True:
-            # if game is NOT over and it's our serve -
-            if st.session_state.possession_id == 0:
-                our_serve()
-            elif st.session_state.defend:
-                our_play()
+        else:
+            # if set is NOT active - take start of set actions            
+            if st.session_state.active_set == False:
+                start_set(match_teams)
             else:
-                opponent_play()    
+                display_lineup()
+                st.markdown("---")
+
+                if st.session_state.possession_id == 0:
+                    our_serve()
+                elif st.session_state.defend:
+                    our_play()
+                else:
+                    opponent_play()    
         
-            #TODO determine appropriate display for deadball actions
-            if st.session_state.possession_id < 2:
-               if st.checkbox("Dead Ball Actions:", value=False):
-                    display_dead_ball()
-            else:
-                if st.checkbox("Whistle Actions:", value=False):
-                    display_live_ball()
+                if st.session_state.possession_id < 2:
+                   if st.checkbox("Dead Ball Actions:", value=False):
+                        dead_ball_actions()
+                else:
+                    if st.checkbox("Whistle Actions:", value=False):
+                        whistle_actions()
+
+
+
+
