@@ -49,7 +49,7 @@ def load_roster_from_database(team_ids:list, db_path:str=DB_FILE) -> pd.DataFram
         print(f"SQLite error: {e} when loading roster")
         df_roster = pd.DataFrame(columns=[
             "player_id", "player_name", "player_jersey", "position_id",
-            "team_id", "player_position", "player_abbv_position"])
+            "team_id", "player_position", "player_abbv_position", "starter"])
     df_roster.set_index("player_id", inplace=True)   
     return df_roster
 
@@ -345,10 +345,14 @@ def assign_starting_lineup(roster: pd.DataFrame) -> None:
     st.session_state.roster = dict(zip(roster["player_jersey"], roster["player_name"]))
     st.session_state.player_ids = dict(zip(roster["player_jersey"], roster.index))
     team_size = int(NUM_PLAYERS[st.session_state.match["set_rules"]])
+    # first try to assign based on starter column
+    if len(roster[roster['starter'] >= 1]['player_jersey'].tolist()) >= team_size:
+        for i in range(1, team_size+1):
+            st.session_state.lineup[i] = int(roster[roster['starter'] == i].loc['player_jersey'])
+        return
+    # fallback to assigning based on positions
     assigned = []
     for i in range(1, team_size+1):
-        #TODO add a "player_starter" column to table in db and roster
-        # enabling user to identify starting role 1 to 6, keep below code as fallback
         pos = role_map[i]
         df_t = roster[~roster["player_jersey"].isin(assigned)]
         df_p = df_t[df_t["player_abbv_position"] == pos]
@@ -473,6 +477,20 @@ def start_set(match_teams: List[str]) -> None:
     displays a header enabling user to assign starting lineup 
     and initial set configuation
     """
+    # user assigns first rotation, and first serve
+    st.markdown("---")
+    start_col = st.columns([1, 2])
+    st.session_state.rotation = start_col[0].slider("Start in Rotation:",
+        min_value=1,
+        max_value=NUM_PLAYERS[st.session_state.match["set_rules"]],
+        width=200,
+        value=1)
+    first_serve = start_col[1].radio("First to serve:", 
+        match_teams,
+        index=0, 
+        horizontal=True)
+    player_options = list(st.session_state.roster.keys())
+
     # reset session state variables for new set
     st.session_state.rally_id = 0
     st.session_state.possession_id = 0 if first_serve == match_teams[0] else 1
@@ -494,20 +512,6 @@ def start_set(match_teams: List[str]) -> None:
     st.session_state.subs = 15
     st.session_state.timeouts = 2
 
-    # user assigns first rotation, and first serve
-    st.markdown("---")
-    start_col = st.columns([1, 2])
-    st.session_state.rotation = start_col[0].slider("Start in Rotation:",
-        min_value=1,
-        max_value=NUM_PLAYERS[st.session_state.match["set_rules"]],
-        width=200,
-        value=1)
-    first_serve = start_col[1].radio("First to serve:", 
-        match_teams,
-        index=0, 
-        horizontal=True)
-    player_options = list(st.session_state.roster.keys())
-    
     # user assigns liberos
     #TODO confirm code block for updating liberos actually works
     for i in range(2):
