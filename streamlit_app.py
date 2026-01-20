@@ -590,8 +590,8 @@ def start_set(match_teams: List[str]) -> None:
 
 def display_lineup() -> None:
     """displays current lineup based on session state"""
-    st.markdown(f"<h4 style='text-align: center'> -- Substitutions Remaining: <span style='color:#FF69B4'>*{st.session_state.subs}*</span>" + 
-                f"-- Timeouts Remaining: <span style='color:#FF69B4'>*{st.session_state.timeouts}*</span> --</h4>",
+    st.markdown(f"<p style='text-align: center'> -- Substitutions Remaining: <span style='color:#FF69B4'>{st.session_state.subs}</span>" + 
+                f"-- Timeouts Remaining: <span style='color:#FF69B4'>{st.session_state.timeouts}</span> --</p>",
                  unsafe_allow_html=True)
     if int(NUM_PLAYERS[st.session_state.match["set_rules"]]) == 6:
         players_col = st.columns(3)
@@ -712,11 +712,11 @@ def score_point(us:bool=True) -> None:
                                                                       st.session_state.sets_them) == 2:
                     return True
             else: return False
-        elif any(item in criteria for item in ["3", "three"]) and sum(st.session_state.score_us, 
-                                                                      st.session_state.score_them) == 3:
+        elif any(item in criteria for item in ["3", "three"]) and sum([st.session_state.sets_us, 
+                                                                      st.session_state.sets_them]) == 3:
                 return True
         else: 
-            if sum(st.session_state.score_us, st.session_state.score_them) > 0:
+            if sum([st.session_state.sets_us, st.session_state.sets_them]) > 0:
                 return True
             else: 
                 return False
