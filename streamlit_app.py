@@ -931,7 +931,6 @@ def our_play() -> None:
         if None not in [player, touch, result]:
             if ("KILL" in RESULT[result].upper()) or ("ERROR" in RESULT[result].upper()) or ("OVER" in RESULT[result].upper()):
                 cols = st.columns(2)
-                #TODO button requires two clicks to register - fix
                 if cols[1].button("Record Volley"):
                     for i in range(len(players)): 
                         ### assign team error touch to all players
@@ -946,10 +945,8 @@ def our_play() -> None:
                         score_point(False)
                     elif "OVER" in RESULT[result].upper():
                         over_net()
-                    break  # escape the loop after recording
-    
                     st.rerun()
-    #TODO handle case where whistle occurs during our play
+                    break  # escape the loop after recording
 
 def dead_ball_actions() -> None:
     st.markdown("---")
@@ -1069,16 +1066,18 @@ with tabs[1]:
                 if st.session_state.possession_id == 0:
                     our_serve()
                 elif st.session_state.defend:
+                    if st.checkbox("Whistle Actions:", value=False):
+                        whistle_actions()
                     our_play()
                 else:
                     opponent_play()    
+                    if st.session_state.possession_id > 1:
+                        if st.checkbox("Whistle Actions:", value=False):
+                            whistle_actions()
         
                 if st.session_state.possession_id < 2 and st.session_state.defend == False:
                    if st.checkbox("Dead Ball Actions:", value=False):
                         dead_ball_actions()
-                else:
-                    if st.checkbox("Whistle Actions:", value=False):
-                        whistle_actions()
 
 
 
