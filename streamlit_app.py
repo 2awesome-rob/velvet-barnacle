@@ -521,7 +521,8 @@ def start_set(match_teams: List[str]) -> None:
     st.session_state.timeouts = 2
 
     # user assigns liberos
-    #TODO confirm code block for updating liberos actually works
+    while len(st.session_state.liberos) < 2:
+        st.session_state.liberos.append(None)
     for i in range(2):
         try:
             idx = st.session_state.liberos[i]
@@ -587,7 +588,7 @@ def start_set(match_teams: List[str]) -> None:
 
 def display_lineup() -> None:
     """displays current lineup based on session state"""
-    st.markdown(f" -- <span style='color: #FF69B4;'>Substitutions Remaining: {st.session_state.subs}</span> -- <span style='color: #FF69B4;'>Timeouts Remaining: {st.session_state.timeouts}</span> --")
+    st.markdown(f" -- Substitutions Remaining: {st.session_state.subs} -- Timeouts Remaining: {st.session_state.timeouts} --")
     st.markdown("---")
     if int(NUM_PLAYERS[st.session_state.match["set_rules"]]) == 6:
         players_col = st.columns(3)
@@ -930,6 +931,7 @@ def our_play() -> None:
         if None not in [player, touch, result]:
             if ("KILL" in RESULT[result].upper()) or ("ERROR" in RESULT[result].upper()) or ("OVER" in RESULT[result].upper()):
                 cols = st.columns(2)
+                #TODO button requires two clicks to register - fix
                 if cols[1].button("Record Volley"):
                     for i in range(len(players)): 
                         ### assign team error touch to all players
@@ -945,8 +947,8 @@ def our_play() -> None:
                     elif "OVER" in RESULT[result].upper():
                         over_net()
                     break  # escape the loop after recording
+    
                     st.rerun()
-    #TODO handle case where user wants to record less than 3 touches
     #TODO handle case where whistle occurs during our play
 
 def dead_ball_actions() -> None:
@@ -1071,7 +1073,7 @@ with tabs[1]:
                 else:
                     opponent_play()    
         
-                if st.session_state.possession_id < 2:
+                if st.session_state.possession_id < 2 and st.session_state.defend == False:
                    if st.checkbox("Dead Ball Actions:", value=False):
                         dead_ball_actions()
                 else:
