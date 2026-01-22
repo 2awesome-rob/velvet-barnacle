@@ -847,7 +847,8 @@ def our_play() -> None:
         blocker_options = [st.session_state.lineup[key] for key in front_row]
         blockers = st.pills("Blockers", 
             blocker_options,
-            selection_mode="multi", default=None,
+            selection_mode="multi", 
+            default=blocker_options[-1],
             format_func=lambda o: st.session_state.roster[o], 
         )
         #identify result of block
